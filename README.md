@@ -32,7 +32,9 @@ MATCH (x) RETURN count(x) AS NumNodes;
 MATCH ()-[r]->() RETURN count(r) AS NumRelationships;
 ```
 
-> *(Paste your results here after running the queries in Neo4j Browser)*
+| NumNodes | NumRelationships |
+|----------|-----------------|
+| 22678    | 64555           |
 
 ## 4. Variety
 
@@ -44,7 +46,7 @@ RETURN a, b
 ORDER BY b.average_rating DESC
 LIMIT 10
 ```
-> *(Add screenshot here)*
+![Query 1](screenshots/screenshotone.png)
 
 ---
 
@@ -58,7 +60,7 @@ RETURN a, b
 ORDER BY numBooks DESC
 LIMIT 30
 ```
-> *(Add screenshot here)*
+![Query 2](screenshots/screenshottwo.png)
 
 ---
 
@@ -73,7 +75,7 @@ MATCH (a:Author)-[:WROTE]->(b)
 RETURN a, b, p
 LIMIT 40
 ```
-> *(Add screenshot here)*
+![Query 3](screenshots/screenshotthree.png)
 
 ---
 
@@ -85,7 +87,7 @@ LIMIT 20
 MATCH (a1)-[:WROTE]->(b:Book)<-[:WROTE]-(a2)
 RETURN a1, a2, b
 ```
-> *(Add screenshot here)*
+![Query 4](screenshots/screenshotfour.png)
 
 ---
 
@@ -99,7 +101,7 @@ MATCH (b:Book)-[:IN_LANGUAGE]->(l)
 RETURN b, l
 LIMIT 50
 ```
-> *(Add screenshot here)*
+![Query 5](screenshots/screenshotfive.png)
 
 ---
 
@@ -110,7 +112,7 @@ WHERE b.num_pages > 500
 RETURN a, b, p
 LIMIT 40
 ```
-> *(Add screenshot here)*
+![Query 6](screenshots/screenshotsix.png)
 
 ---
 
