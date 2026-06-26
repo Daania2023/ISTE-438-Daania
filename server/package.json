@@ -1,0 +1,14 @@
+{
+  "name": "neo4j-books-server",
+  "version": "1.0.0",
+  "description": "Neo4j Books Project - Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "neo4j-driver": "^5.12.0"
+  }
+}

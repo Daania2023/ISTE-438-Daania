@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>📚 Books Graph Explorer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 14px 24px;
+      background: #1a1a2e;
+      border-bottom: 1px solid #2a2a4a;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    header h1 {
+      font-size: 1.2rem;
+      color: #a78bfa;
+      white-space: nowrap;
+    }
+
+    select {
+      background: #2a2a4a;
+      color: #e0e0e0;
+      border: 1px solid #4a4a7a;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      flex: 1;
+      min-width: 200px;
+      cursor: pointer;
+    }
+
+    select:focus { outline: none; border-color: #a78bfa; }
+
+    textarea {
+      background: #2a2a4a;
+      color: #e0e0e0;
+      border: 1px solid #4a4a7a;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      font-family: 'Courier New', monospace;
+      resize: vertical;
+      flex: 2;
+      min-width: 300px;
+      min-height: 60px;
+    }
+
+    textarea:focus { outline: none; border-color: #a78bfa; }
+
+    button {
+      background: #7c3aed;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 20px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+
+    button:hover { background: #6d28d9; }
+    button:disabled { background: #4a4a7a; cursor: not-allowed; }
+
+    #stats {
+      font-size: 0.8rem;
+      color: #888;
+      white-space: nowrap;
+    }
+
+    #graph-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .node circle {
+      stroke-width: 2px;
+      cursor: pointer;
+      transition: r 0.2s;
+    }
+
+    .node text {
+      font-size: 10px;
+      fill: #ddd;
+      pointer-events: none;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    .link {
+      stroke-opacity: 0.5;
+      stroke-width: 1.5px;
+    }
+
+    .link-label {
+      font-size: 8px;
+      fill: #aaa;
+      pointer-events: none;
+    }
+
+    #tooltip {
+      position: absolute;
+      background: #1a1a2e;
+      border: 1px solid #4a4a7a;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.8rem;
+      pointer-events: none;
+      max-width: 260px;
+      line-height: 1.6;
+      display: none;
+      z-index: 10;
+    }
+
+    #tooltip strong { color: #a78bfa; }
+
+    #error {
+      color: #f87171;
+      font-size: 0.8rem;
+      padding: 4px 0;
+      display: none;
+    }
+
+    /* Legend */
+    #legend {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.75rem;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0;
+    }
+
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>📚 Books Graph</h1>
+  <select id="preset-select">
+    <option value="">— Choose a preset query —</option>
+  </select>
+  <textarea id="query-input" placeholder="Type a Cypher query or pick a preset above..."></textarea>
+  <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+    <button id="run-btn">▶ Run</button>
+    <span id="stats"></span>
+    <span id="error"></span>
+  </div>
+</header>
+
+<div id="graph-container">
+  <svg id="graph"></svg>
+  <div id="tooltip"></div>
+  <div id="legend"></div>
+</div>
+
+<script>
+  const SERVER = 'http://localhost:3000';
+
+  // ── Color map by label ──────────────────────────────────────
+  const COLOR = {
+    Book:      '#f59e0b',
+    Author:    '#34d399',
+    Publisher: '#60a5fa',
+    Language:  '#f472b6',
+    default:   '#a78bfa'
+  };
+
+  const LINK_COLOR = {
+    WROTE:        '#34d399',
+    PUBLISHED_BY: '#60a5fa',
+    IN_LANGUAGE:  '#f472b6',
+    CO_AUTHORED:  '#fb923c',
+    default:      '#666'
+  };
+
+  // ── Load presets ────────────────────────────────────────────
+  async function loadPresets() {
+    try {
+      const res = await fetch(`${SERVER}/presets`);
+      const presets = await res.json();
+      const sel = document.getElementById('preset-select');
+      presets.forEach((p, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = p.label;
+        sel.appendChild(opt);
+      });
+      window._presets = presets;
+    } catch(e) {
+      console.error('Could not load presets', e);
+    }
+  }
+
+  document.getElementById('preset-select').addEventListener('change', function() {
+    if (this.value === '') return;
+    const p = window._presets[parseInt(this.value)];
+    document.getElementById('query-input').value = p.query;
+  });
+
+  // ── Run query ───────────────────────────────────────────────
+  document.getElementById('run-btn').addEventListener('click', runQuery);
+  document.getElementById('query-input').addEventListener('keydown', e => {
+    if (e.ctrlKey && e.key === 'Enter') runQuery();
+  });
+
+  async function runQuery() {
+    const query = document.getElementById('query-input').value.trim();
+    if (!query) return;
+
+    const btn = document.getElementById('run-btn');
+    const errEl = document.getElementById('error');
+    const statsEl = document.getElementById('stats');
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Running...';
+    errEl.style.display = 'none';
+    statsEl.textContent = '';
+
+    try {
+      const res = await fetch(`${SERVER}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        errEl.textContent = '⚠ ' + data.error;
+        errEl.style.display = 'block';
+        return;
+      }
+
+      statsEl.textContent = `${data.nodes.length} nodes · ${data.links.length} links`;
+      drawGraph(data.nodes, data.links);
+    } catch(e) {
+      errEl.textContent = '⚠ Could not reach server. Is it running?';
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '▶ Run';
+    }
+  }
+
+  // ── D3 Graph ────────────────────────────────────────────────
+  function drawGraph(nodes, links) {
+    const container = document.getElementById('graph-container');
+    const W = container.clientWidth;
+    const H = container.clientHeight;
+
+    d3.select('#graph').selectAll('*').remove();
+
+    const svg = d3.select('#graph')
+      .call(d3.zoom().scaleExtent([0.1, 5]).on('zoom', e => {
+        g.attr('transform', e.transform);
+      }));
+
+    const g = svg.append('g');
+
+    // Arrow markers
+    const defs = svg.append('defs');
+    Object.entries(LINK_COLOR).forEach(([type, color]) => {
+      defs.append('marker')
+        .attr('id', `arrow-${type}`)
+        .attr('viewBox', '0 -4 8 8')
+        .attr('refX', 18)
+        .attr('refY', 0)
+        .attr('markerWidth', 6)
+        .attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-4L8,0L0,4')
+        .attr('fill', color);
+    });
+
+    // Build id -> index map for links
+    const nodeIndex = new Map(nodes.map((n, i) => [n.id, i]));
+    const safeLinks = links
+      .filter(l => nodeIndex.has(l.source) && nodeIndex.has(l.target))
+      .map(l => ({ ...l, source: nodeIndex.get(l.source), target: nodeIndex.get(l.target) }));
+
+    // Simulation
+    const sim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(safeLinks).distance(80).strength(0.5))
+      .force('charge', d3.forceManyBody().strength(-200))
+      .force('center', d3.forceCenter(W / 2, H / 2))
+      .force('collision', d3.forceCollide(20));
+
+    // Links
+    const link = g.append('g').selectAll('line')
+      .data(safeLinks)
+      .enter().append('line')
+      .attr('class', 'link')
+      .attr('stroke', d => LINK_COLOR[d.type] || LINK_COLOR.default)
+      .attr('marker-end', d => `url(#arrow-${d.type || 'default'})`);
+
+    // Link labels
+    const linkLabel = g.append('g').selectAll('text')
+      .data(safeLinks)
+      .enter().append('text')
+      .attr('class', 'link-label')
+      .text(d => d.type);
+
+    // Nodes
+    const node = g.append('g').selectAll('.node')
+      .data(nodes)
+      .enter().append('g')
+      .attr('class', 'node')
+      .call(d3.drag()
+        .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+        .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+      );
+
+    node.append('circle')
+      .attr('r', d => nodeRadius(d))
+      .attr('fill', d => COLOR[d.label] || COLOR.default)
+      .attr('stroke', d => d3.color(COLOR[d.label] || COLOR.default).darker(1));
+
+    node.append('text')
+      .text(d => nodeLabel(d))
+      .attr('dy', d => nodeRadius(d) + 10);
+
+    // Tooltip
+    const tooltip = document.getElementById('tooltip');
+    node.on('mouseover', (e, d) => {
+      tooltip.style.display = 'block';
+      tooltip.innerHTML = `<strong>${d.label}</strong><br>` +
+        Object.entries(d.properties)
+          .filter(([k]) => !['bookID','isbn'].includes(k))
+          .map(([k, v]) => `${k}: ${v}`).join('<br>');
+    })
+    .on('mousemove', e => {
+      tooltip.style.left = (e.offsetX + 14) + 'px';
+      tooltip.style.top = (e.offsetY + 14) + 'px';
+    })
+    .on('mouseout', () => { tooltip.style.display = 'none'; });
+
+    sim.on('tick', () => {
+      link
+        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      linkLabel
+        .attr('x', d => (d.source.x + d.target.x) / 2)
+        .attr('y', d => (d.source.y + d.target.y) / 2);
+      node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+
+    // Legend
+    buildLegend([...new Set(nodes.map(n => n.label))]);
+  }
+
+  function nodeRadius(d) {
+    if (d.label === 'Book') return Math.min(10 + (d.properties.average_rating || 0) * 2, 20);
+    if (d.label === 'Author') return 14;
+    if (d.label === 'Publisher') return 12;
+    return 10;
+  }
+
+  function nodeLabel(d) {
+    const name = d.properties.title || d.properties.name || d.properties.code || '';
+    return name.length > 18 ? name.slice(0, 16) + '…' : name;
+  }
+
+  function buildLegend(labels) {
+    const legend = document.getElementById('legend');
+    legend.innerHTML = labels.map(l =>
+      `<div class="legend-item">
+        <div class="legend-dot" style="background:${COLOR[l] || COLOR.default}"></div>
+        <span>${l}</span>
+      </div>`
+    ).join('');
+  }
+
+  loadPresets();
+</script>
+</body>
+</html>
